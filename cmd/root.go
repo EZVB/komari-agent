@@ -185,6 +185,9 @@ func init() {
 	RootCmd.PersistentFlags().IntVar(&flags.ProtocolVersion, "protocol-version", 2, "Report protocol version (1 or 2)")
 	RootCmd.PersistentFlags().BoolVar(&flags.DisableCompression, "disable-compression", false, "Disable v2 gzip/permessage-deflate compression")
 	RootCmd.PersistentFlags().StringVar(&flags.PreferIPVersion, "prefer-ip-version", "", "Prefer IP version for dashboard connections: 4 or 6")
+	RootCmd.PersistentFlags().StringVar(&flags.XrayMetricsEndpoint, "xray-metrics-endpoint", "", "Xray metrics endpoint (host:port or http(s) URL); empty auto-discovers metrics.listen")
+	RootCmd.PersistentFlags().StringVar(&flags.XrayConfigPath, "xray-config", "", "Xray config file or directory used to discover metrics.listen")
+	RootCmd.PersistentFlags().StringVar(&flags.XrayProcessName, "xray-process-name", "xray", "Xray process name used to detect traffic counter resets")
 	RootCmd.PersistentFlags().ParseErrorsWhitelist.UnknownFlags = true
 }
 
