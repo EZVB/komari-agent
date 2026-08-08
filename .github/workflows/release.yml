@@ -1,15 +1,34 @@
 name: Release Binaries
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
   contents: write
 
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Create GitHub release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          gh release view "${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create "${TAG}" \
+              --repo "${{ github.repository }}" \
+              --title "Komari Agent ${TAG}" \
+              --notes "Adds Xray inbound cumulative traffic reporting for Komari traffic accounting."
+
   build-and-attach:
-    if: ${{ !github.event.release.prerelease }}
+    needs: create-release
     runs-on: ubuntu-latest
 
     strategy:
@@ -41,7 +60,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-          VERSION: ${{ github.event.release.tag_name }}
+          VERSION: ${{ needs.create-release.outputs.tag }}
         run: |
           BINARY_NAME=komari-agent-${{ matrix.goos }}-${{ matrix.goarch }}
           if [ "${{ matrix.goos }}" = "windows" ]; then
@@ -62,5 +81,5 @@ jobs:
           elif [ "${{ matrix.goos }}" = "darwin" ]; then
             true
           fi
-          gh release upload ${{ github.event.release.tag_name }} $BINARY_NAME --repo ${{ github.repository }}
+          gh release upload ${{ needs.create-release.outputs.tag }} $BINARY_NAME --repo ${{ github.repository }} --clobber
         shell: bash
