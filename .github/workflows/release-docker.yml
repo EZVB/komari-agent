@@ -1,9 +1,15 @@
 name: Publish Docker Image
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag to publish
+        required: true
+        default: 1.2.61
 
 permissions:
   contents: read
@@ -15,7 +21,6 @@ env:
 
 jobs:
   build-and-push-multi-arch:
-    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,11 +39,8 @@ jobs:
         env:
           GOOS: linux
           CGO_ENABLED: 0
+          VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          VERSION="${{ github.event.release.tag_name }}"
-          if [ -z "$VERSION" ]; then
-            VERSION="${{ github.sha }}"
-          fi
           LDFLAGS="-X github.com/komari-monitor/komari-agent/update.CurrentVersion=${VERSION}"
 
           echo "Building for linux/amd64..."
@@ -66,7 +68,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ github.event.release.tag_name }}
+            type=raw,value=${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
             type=raw,value=latest
 
       - name: Build and push Docker image
