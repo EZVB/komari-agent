@@ -15,7 +15,6 @@ import (
 	"syscall"
 
 	"github.com/komari-monitor/komari-agent/dnsresolver"
-	"github.com/komari-monitor/komari-agent/monitoring/netstatic"
 	monitoring "github.com/komari-monitor/komari-agent/monitoring/unit"
 	"github.com/komari-monitor/komari-agent/server"
 	"github.com/komari-monitor/komari-agent/update"
@@ -54,7 +53,6 @@ var RootCmd = &cobra.Command{
 		go func() {
 			<-stopCtx.Done()
 			log.Printf("shutting down gracefully...")
-			netstatic.Stop()
 			os.Exit(0)
 		}()
 
@@ -65,23 +63,6 @@ var RootCmd = &cobra.Command{
 
 		if !flags.DisableWebSsh {
 			go WarnKomariRunning()
-		}
-
-		if flags.MonthRotate != 0 {
-			err := netstatic.StartOrContinue()
-			if err != nil {
-				log.Println("Failed to start netstatic monitoring:", err)
-			}
-			nics, err := monitoring.InterfaceList()
-			if err != nil {
-				log.Println("Failed to get interface list for netstatic:", err)
-			}
-			err = netstatic.SetNewConfig(netstatic.NetStaticConfig{
-				Nics: nics,
-			})
-			if err != nil {
-				log.Println("Failed to set netstatic config:", err)
-			}
 		}
 
 		log.Println("Komari Agent", update.CurrentVersion)
@@ -172,7 +153,7 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&flags.IncludeNics, "include-nics", "", "Comma-separated list of network interfaces to include")
 	RootCmd.PersistentFlags().StringVar(&flags.ExcludeNics, "exclude-nics", "", "Comma-separated list of network interfaces to exclude")
 	RootCmd.PersistentFlags().StringVar(&flags.IncludeMountpoints, "include-mountpoint", "", "Semicolon-separated list of mount points to include for disk statistics")
-	RootCmd.PersistentFlags().IntVar(&flags.MonthRotate, "month-rotate", 0, "Month reset for network statistics (0 to disable)")
+	RootCmd.PersistentFlags().IntVar(&flags.MonthRotate, "month-rotate", 0, "Deprecated compatibility option; traffic reset is handled by the server")
 	RootCmd.PersistentFlags().BoolVar(&flags.MemoryIncludeCache, "memory-include-cache", false, "Include cache/buffer in memory usage")
 	RootCmd.PersistentFlags().BoolVar(&flags.MemoryReportRawUsed, "memory-exclude-bcf", false, "Use \"raminfo.Used = v.Total - v.Free - v.Buffers - v.Cached\" calculation for memory usage")
 	RootCmd.PersistentFlags().StringVar(&flags.CustomDNS, "custom-dns", "", "Custom DNS server to use (e.g. 8.8.8.8, 114.114.114.114). By default, the program uses the system DNS resolver.")

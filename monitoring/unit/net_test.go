@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"errors"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -116,6 +117,52 @@ func TestParseNics(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseProcNetworkTotalsUsesPhysicalInterfaces(t *testing.T) {
+	procNetDev := `Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 1000 1 0 0 0 0 0 0 1000 1 0 0 0 0 0 0
+  eth0: 2000 2 0 0 0 0 0 0 3000 3 0 0 0 0 0 0
+docker0: 4000 4 0 0 0 0 0 0 5000 5 0 0 0 0 0 0
+ veth42: 6000 6 0 0 0 0 0 0 7000 7 0 0 0 0 0 0
+  ens18: 8000 8 0 0 0 0 0 0 9000 9 0 0 0 0 0 0
+`
+
+	totalUp, totalDown, err := parseProcNetworkTotals(strings.NewReader(procNetDev), nil, nil)
+	if err != nil {
+		t.Fatalf("parseProcNetworkTotals failed: %v", err)
+	}
+	if totalUp != 12000 || totalDown != 10000 {
+		t.Fatalf("expected physical totals up=12000 down=10000, got up=%d down=%d", totalUp, totalDown)
+	}
+}
+
+func TestParseProcNetworkTotalsRespectsExplicitFilters(t *testing.T) {
+	procNetDev := `Inter-|   Receive | Transmit
+ face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed
+  eth0: 100 1 0 0 0 0 0 0 200 1 0 0 0 0 0 0
+   wg0: 300 1 0 0 0 0 0 0 400 1 0 0 0 0 0 0
+`
+
+	totalUp, totalDown, err := parseProcNetworkTotals(
+		strings.NewReader(procNetDev),
+		map[string]struct{}{"wg0": {}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("parseProcNetworkTotals failed: %v", err)
+	}
+	if totalUp != 400 || totalDown != 300 {
+		t.Fatalf("expected explicitly included tunnel totals up=400 down=300, got up=%d down=%d", totalUp, totalDown)
+	}
+}
+
+func TestParseProcNetworkTotalsRejectsInvalidData(t *testing.T) {
+	_, _, err := parseProcNetworkTotals(strings.NewReader("Inter-| Receive | Transmit\neth0: invalid\n"), nil, nil)
+	if err == nil {
+		t.Fatal("expected invalid proc data to return an error")
 	}
 }
 
@@ -252,8 +299,16 @@ func TestNetworkSpeedFallback(t *testing.T) {
 }
 
 func TestNetworkSpeedWithoutMonthRotate(t *testing.T) {
+	originalMonthRotate := flags.MonthRotate
+	originalIncludeNics := flags.IncludeNics
+	originalExcludeNics := flags.ExcludeNics
+	defer func() {
+		flags.MonthRotate = originalMonthRotate
+		flags.IncludeNics = originalIncludeNics
+		flags.ExcludeNics = originalExcludeNics
+	}()
 
-	flags.MonthRotate = 1
+	flags.MonthRotate = 0
 
 	// 设置测试值
 	flags.IncludeNics = ""
@@ -273,18 +328,25 @@ func TestNetworkSpeedWithMonthRotate(t *testing.T) {
 	originalMonthRotate := flags.MonthRotate
 	originalIncludeNics := flags.IncludeNics
 	originalExcludeNics := flags.ExcludeNics
+	originalAdjuster := defaultNetworkCounterAdjuster
 
 	// 恢复原始值
 	defer func() {
 		flags.MonthRotate = originalMonthRotate
 		flags.IncludeNics = originalIncludeNics
 		flags.ExcludeNics = originalExcludeNics
+		defaultNetworkCounterAdjuster = originalAdjuster
 	}()
 
 	// 设置测试值 - 启用月重置
 	flags.MonthRotate = 1
 	flags.IncludeNics = ""
 	flags.ExcludeNics = ""
+	tempDir := t.TempDir()
+	defaultNetworkCounterAdjuster = &networkCounterAdjuster{
+		statePath:  filepath.Join(tempDir, "state.json"),
+		legacyPath: filepath.Join(tempDir, "missing.json"),
+	}
 
 	totalUp, totalDown, upSpeed, downSpeed, err := NetworkSpeed()
 

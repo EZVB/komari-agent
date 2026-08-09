@@ -3,15 +3,15 @@ package monitoring
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/komari-monitor/komari-agent/monitoring/netstatic"
-	"github.com/komari-monitor/komari-agent/utils"
 	"github.com/shirou/gopsutil/v4/net"
 )
 
@@ -222,39 +222,6 @@ type VnstatOutput struct {
 func NetworkSpeed() (totalUp, totalDown, upSpeed, downSpeed uint64, err error) {
 	includeNics := parseNics(flags.IncludeNics)
 	excludeNics := parseNics(flags.ExcludeNics)
-
-	// 如果设置了月重置（非0），统计totalUp、totalDown
-	if flags.MonthRotate != 0 {
-		netstatic.StartOrContinue() // 确保netstatic在运行
-		now := uint64(time.Now().Unix())
-		resetDay := uint64(utils.GetLastResetDate(flags.MonthRotate, time.Now()).Unix())
-		nicStatics, err := netstatic.GetTotalTrafficBetween(resetDay, now)
-		if err != nil {
-			// 如果netstatic失败，回退到原来的方法，并返回额外的错误信息
-			fallbackUp, fallbackDown, fallbackUpSpeed, fallbackDownSpeed, fallbackErr := getNetworkSpeedFallback(includeNics, excludeNics)
-			if fallbackErr != nil {
-				return fallbackUp, fallbackDown, fallbackUpSpeed, fallbackDownSpeed, fmt.Errorf("failed to call GetTotalTrafficBetween: %v; fallback error: %w", err, fallbackErr)
-			}
-			return fallbackUp, fallbackDown, fallbackUpSpeed, fallbackDownSpeed, fmt.Errorf("failed to call GetTotalTrafficBetween: %w", err)
-		}
-
-		for interfaceName, stats := range nicStatics {
-			if shouldInclude(interfaceName, includeNics, excludeNics) {
-				totalUp += stats.Tx
-				totalDown += stats.Rx
-			}
-		}
-
-		// 对于实时速度，仍然使用网卡累计计数器差值
-		_, _, upSpeed, downSpeed, err = getNetworkSpeedFallback(includeNics, excludeNics)
-		if err != nil {
-			return totalUp, totalDown, 0, 0, err
-		}
-
-		return totalUp, totalDown, upSpeed, downSpeed, nil
-	}
-
-	// 如果没有设置月重置，使用原来的方法
 	return getNetworkSpeedFallback(includeNics, excludeNics)
 }
 
@@ -265,10 +232,76 @@ func getNetworkSpeedFallback(includeNics, excludeNics map[string]struct{}) (tota
 	}
 
 	upSpeed, downSpeed = updateNetworkSpeedSample(totalUp, totalDown, time.Now())
+	totalUp, totalDown = adjustNetworkTotalsForLegacy(totalUp, totalDown, includeNics, excludeNics)
 	return totalUp, totalDown, upSpeed, downSpeed, nil
 }
 
 func collectNetworkTotals(includeNics, excludeNics map[string]struct{}) (totalUp, totalDown uint64, err error) {
+	if runtime.GOOS == "linux" {
+		totalUp, totalDown, procErr := collectProcNetworkTotals(procRoot(), includeNics, excludeNics)
+		if procErr == nil {
+			return totalUp, totalDown, nil
+		}
+
+		totalUp, totalDown, fallbackErr := collectGopsutilNetworkTotals(includeNics, excludeNics)
+		if fallbackErr != nil {
+			return 0, 0, fmt.Errorf("proc net counters failed: %w; gopsutil fallback failed: %v", procErr, fallbackErr)
+		}
+		return totalUp, totalDown, nil
+	}
+
+	return collectGopsutilNetworkTotals(includeNics, excludeNics)
+}
+
+func collectProcNetworkTotals(root string, includeNics, excludeNics map[string]struct{}) (totalUp, totalDown uint64, err error) {
+	file, err := os.Open(filepath.Join(root, "net", "dev"))
+	if err != nil {
+		return 0, 0, err
+	}
+	defer file.Close()
+
+	return parseProcNetworkTotals(file, includeNics, excludeNics)
+}
+
+func parseProcNetworkTotals(reader io.Reader, includeNics, excludeNics map[string]struct{}) (totalUp, totalDown uint64, err error) {
+	scanner := bufio.NewScanner(reader)
+	parsedInterface := false
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		separator := strings.IndexByte(line, ':')
+		if separator < 0 {
+			continue
+		}
+
+		name := strings.TrimSpace(line[:separator])
+		fields := strings.Fields(line[separator+1:])
+		if name == "" || len(fields) < 9 {
+			continue
+		}
+
+		received, receiveErr := strconv.ParseUint(fields[0], 10, 64)
+		transmitted, transmitErr := strconv.ParseUint(fields[8], 10, 64)
+		if receiveErr != nil || transmitErr != nil {
+			continue
+		}
+		parsedInterface = true
+
+		if shouldInclude(name, includeNics, excludeNics) {
+			totalUp += transmitted
+			totalDown += received
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, 0, err
+	}
+	if !parsedInterface {
+		return 0, 0, fmt.Errorf("no valid network counters found")
+	}
+
+	return totalUp, totalDown, nil
+}
+
+func collectGopsutilNetworkTotals(includeNics, excludeNics map[string]struct{}) (totalUp, totalDown uint64, err error) {
 	ioCounters, err := net.IOCounters(true)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to get network IO counters: %w", err)
