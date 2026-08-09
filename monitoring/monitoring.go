@@ -1,18 +1,15 @@
 package monitoring
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 
 	pkg_flags "github.com/komari-monitor/komari-agent/cmd/flags"
 	unit "github.com/komari-monitor/komari-agent/monitoring/unit"
-	xraymetrics "github.com/komari-monitor/komari-agent/monitoring/xray"
 )
 
 var flags = pkg_flags.GlobalConfig
-var xrayCollector = xraymetrics.NewCollector()
 
 type report struct {
 	CPU         cpuReport         `json:"cpu"`
@@ -21,7 +18,6 @@ type report struct {
 	Load        loadReport        `json:"load"`
 	Disk        usageReport       `json:"disk"`
 	Network     networkReport     `json:"network"`
-	Xray        *xrayReport       `json:"xray,omitempty"`
 	Connections connectionsReport `json:"connections"`
 	GPU         interface{}       `json:"gpu,omitempty"`
 	Uptime      uint64            `json:"uptime"`
@@ -49,12 +45,6 @@ type networkReport struct {
 	Down      uint64 `json:"down"`
 	TotalUp   uint64 `json:"totalUp"`
 	TotalDown uint64 `json:"totalDown"`
-}
-
-type xrayReport struct {
-	TotalUp   int64 `json:"totalUp"`
-	TotalDown int64 `json:"totalDown"`
-	BootTime  int64 `json:"bootTime,omitempty"`
 }
 
 type connectionsReport struct {
@@ -107,19 +97,6 @@ func GenerateReport() []byte {
 		message += fmt.Sprintf("failed to get network speed: %v\n", err)
 	}
 	data.Network = networkReport{Up: networkUp, Down: networkDown, TotalUp: totalUp, TotalDown: totalDown}
-
-	xrayTraffic, err := xrayCollector.Collect(context.Background(), xraymetrics.Options{
-		MetricsEndpoint: flags.XrayMetricsEndpoint,
-		ConfigPath:      flags.XrayConfigPath,
-		ProcessName:     flags.XrayProcessName,
-	})
-	if err == nil {
-		data.Xray = &xrayReport{
-			TotalUp:   xrayTraffic.TotalUp,
-			TotalDown: xrayTraffic.TotalDown,
-			BootTime:  xrayTraffic.BootTime,
-		}
-	}
 
 	tcpCount, udpCount, err := unit.ConnectionsCount()
 	if err != nil {

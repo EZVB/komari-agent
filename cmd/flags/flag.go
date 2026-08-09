@@ -30,9 +30,6 @@ type Config struct {
 	DisableCompression  bool    `json:"disable_compression" env:"AGENT_DISABLE_COMPRESSION"`       // 禁用v2传输压缩
 	PreferIPVersion     string  `json:"prefer_ip_version" env:"AGENT_PREFER_IP_VERSION"`           // 面板连接优先使用的 IP 版本：4 或 6
 
-	XrayMetricsEndpoint string `json:"xray_metrics_endpoint" env:"AGENT_XRAY_METRICS_ENDPOINT"` // Optional Xray metrics endpoint (host:port or URL).
-	XrayConfigPath      string `json:"xray_config_path" env:"AGENT_XRAY_CONFIG_PATH"`           // Optional Xray config file or directory used to discover metrics.listen.
-	XrayProcessName     string `json:"xray_process_name" env:"AGENT_XRAY_PROCESS_NAME"`         // Xray process name used to detect counter resets.
 }
 
 var GlobalConfig = &Config{}

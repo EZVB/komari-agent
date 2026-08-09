@@ -9,7 +9,7 @@ on:
       tag:
         description: Version tag to publish
         required: true
-        default: 1.2.62
+        default: 1.2.63
 
 permissions:
   contents: write

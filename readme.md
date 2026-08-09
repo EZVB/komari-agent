@@ -61,9 +61,6 @@ export AGENT_TOKEN="your-token"
 | `protocol_version` | `AGENT_PROTOCOL_VERSION` | `--protocol-version` | 上报协议版本，默认 `2` | `1.2.10` |
 | `disable_compression` | `AGENT_DISABLE_COMPRESSION` | `--disable-compression` | 禁用 v2 传输压缩 | `1.2.10` |
 | `prefer_ip_version` | `AGENT_PREFER_IP_VERSION` | `--prefer-ip-version` | 优先使用 IP 版本，可选 `4` 或 `6` | 未发布 |
-| `xray_metrics_endpoint` | `AGENT_XRAY_METRICS_ENDPOINT` | `--xray-metrics-endpoint` | Xray metrics 地址，例如 `127.0.0.1:11111`；留空自动发现 | `1.2.61` |
-| `xray_config_path` | `AGENT_XRAY_CONFIG_PATH` | `--xray-config` | Xray 配置文件或配置目录，用于读取 `metrics.listen` | `1.2.61` |
-| `xray_process_name` | `AGENT_XRAY_PROCESS_NAME` | `--xray-process-name` | Xray 进程名，用于识别累计计数器重置，默认 `xray` | `1.2.61` |
 
 完整参数可运行：
 
@@ -72,32 +69,3 @@ export AGENT_TOKEN="your-token"
 ```
 
 详见 `cmd/flags/flags.go` 及 `cmd/root.go`
-
-## Xray 累计流量
-
-Agent 会读取 Xray `/debug/vars` 中的 inbound 累计上行和下行流量，并随常规监控报告上报。为避免同一份流量重复统计，不会将 outbound 或 user 维度再次相加。
-
-Xray 至少需要配置 metrics 监听地址：
-
-```json
-{
-  "metrics": {
-    "tag": "metrics",
-    "listen": "127.0.0.1:11111"
-  },
-  "policy": {
-    "system": {
-      "statsInboundUplink": true,
-      "statsInboundDownlink": true
-    }
-  }
-}
-```
-
-Agent 默认会检查 `/usr/local/etc/xray` 和 `/etc/xray` 下的 JSON 配置。也可以显式传入：
-
-```bash
-komari-agent --xray-config /usr/local/etc/xray/config.json
-# 或
-komari-agent --xray-metrics-endpoint 127.0.0.1:11111
-```
