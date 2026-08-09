@@ -142,6 +142,20 @@ func TestShouldInclude(t *testing.T) {
 			expected:    false,
 		},
 		{
+			name:        "wireguard interface should be excluded by default",
+			nicName:     "wg0",
+			includeNics: nil,
+			excludeNics: nil,
+			expected:    false,
+		},
+		{
+			name:        "tailscale interface should be excluded case insensitively",
+			nicName:     "Tailscale0",
+			includeNics: nil,
+			excludeNics: nil,
+			expected:    false,
+		},
+		{
 			name:        "normal interface with no filters",
 			nicName:     "eth0",
 			includeNics: nil,
@@ -192,6 +206,15 @@ func TestShouldInclude(t *testing.T) {
 			},
 			excludeNics: nil,
 			expected:    false,
+		},
+		{
+			name:    "explicit include can monitor a tunnel interface",
+			nicName: "wg0",
+			includeNics: map[string]struct{}{
+				"wg0": {},
+			},
+			excludeNics: nil,
+			expected:    true,
 		},
 		{
 			name:        "interface with wildcard pattern in exclude list",

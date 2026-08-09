@@ -111,23 +111,26 @@ func countProcNetFile(path string) (int, error) {
 	return count, scanner.Err()
 }
 
-var (
-	// 预定义常见的回环和虚拟接口名称
-	loopbackNames = map[string]struct{}{
-		"br":      {},
-		"cni":     {},
-		"docker":  {},
-		"podman":  {},
-		"flannel": {},
-		"lo":      {},
-		"veth":    {}, // Docker
-		"virbr":   {}, // KVM
-		"vmbr":    {}, // Proxmox
-		"tap":     {},
-		"fwbr":    {},
-		"fwpr":    {},
-	}
-)
+var defaultExcludedNICPrefixes = map[string]struct{}{
+	"br":        {},
+	"calico":    {},
+	"cni":       {},
+	"docker":    {},
+	"dummy":     {},
+	"flannel":   {},
+	"fwbr":      {},
+	"fwpr":      {},
+	"podman":    {},
+	"tap":       {},
+	"tailscale": {},
+	"tun":       {},
+	"tunl":      {},
+	"veth":      {},
+	"virbr":     {},
+	"vmbr":      {},
+	"vnet":      {},
+	"wg":        {},
+}
 
 // VnstatInterface represents a network interface in vnstat output
 type VnstatInterface struct {
@@ -339,28 +342,36 @@ func parseNics(nics string) map[string]struct{} {
 }
 
 func shouldInclude(nicName string, includeNics, excludeNics map[string]struct{}) bool {
-	// 默认排除回环接口
-	for loopbackName := range loopbackNames {
-		if strings.HasPrefix(nicName, loopbackName) {
-			return false
-		}
+	name := strings.ToLower(strings.TrimSpace(nicName))
+	if name == "lo" || strings.HasPrefix(name, "lo:") {
+		return false
 	}
 
-	// 如果定义了白名单，则只包括白名单中的接口
+	// An explicit allow-list wins over the built-in virtual-interface filter.
+	// This keeps provider-facing traffic accurate by default while allowing an
+	// operator to intentionally monitor a tunnel interface.
 	for pattern := range includeNics {
 		if matched, _ := filepath.Match(pattern, nicName); matched {
 			return true
 		}
 	}
+	if len(includeNics) != 0 {
+		return false
+	}
 
-	// 如果定义了黑名单，则排除黑名单中的接口
+	for prefix := range defaultExcludedNICPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return false
+		}
+	}
+
 	for pattern := range excludeNics {
 		if matched, _ := filepath.Match(pattern, nicName); matched {
 			return false
 		}
 	}
 
-	return len(includeNics) == 0 // 如果没有定义白名单，则默认包含所有非回环接口
+	return true
 }
 
 func InterfaceList() ([]string, error) {

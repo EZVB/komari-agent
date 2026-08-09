@@ -9,7 +9,7 @@ on:
       tag:
         description: Version tag to publish
         required: true
-        default: 1.2.61
+        default: 1.2.62
 
 permissions:
   contents: write
@@ -31,7 +31,7 @@ jobs:
             gh release create "${TAG}" \
               --repo "${{ github.repository }}" \
               --title "Komari Agent ${TAG}" \
-              --notes "Adds Xray inbound cumulative traffic reporting for Komari traffic accounting."
+              --notes "Improves system network traffic accuracy by excluding common virtual and tunnel interfaces from default accounting. Explicit --include-nics selections continue to take precedence."
 
   build-and-attach:
     needs: create-release
