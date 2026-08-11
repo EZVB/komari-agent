@@ -69,6 +69,63 @@ func TestNetworkCounterAdjusterSwitchesToRawAfterReboot(t *testing.T) {
 	}
 }
 
+func TestNetworkCounterAdjusterRebasesOnlyRolledBackDirection(t *testing.T) {
+	tempDir := t.TempDir()
+	statePath := filepath.Join(tempDir, "state.json")
+	legacyPath := filepath.Join(tempDir, "net_static.json")
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(legacyPath, []byte(`{"interfaces":{}}`), 0o600); err != nil {
+		t.Fatalf("failed to write legacy counters: %v", err)
+	}
+
+	adjuster := &networkCounterAdjuster{statePath: statePath, legacyPath: legacyPath}
+	adjuster.apply(10_000, 20_000, "boot-a", "|", 1, now, nil, nil)
+	adjuster.apply(10_150, 20_200, "boot-a", "|", 1, now, nil, nil)
+
+	up, down := adjuster.apply(100, 20_500, "boot-a", "|", 1, now, nil, nil)
+	if up != 150 || down != 500 {
+		t.Fatalf("expected rolled-up baseline and normal down delta, got up=%d down=%d", up, down)
+	}
+
+	state, err := loadNetworkCounterState(statePath)
+	if err != nil {
+		t.Fatalf("failed to read counter state: %v", err)
+	}
+	if state.RawMode {
+		t.Fatalf("expected compatibility mode to remain active, got %+v", state)
+	}
+
+	restarted := &networkCounterAdjuster{statePath: statePath, legacyPath: legacyPath}
+	up, down = restarted.apply(150, 20_600, "boot-a", "|", 1, now, nil, nil)
+	if up != 200 || down != 600 {
+		t.Fatalf("expected persisted rebased counters up=200 down=600, got up=%d down=%d", up, down)
+	}
+}
+
+func TestNetworkCounterAdjusterRebasesWhenFilterChanges(t *testing.T) {
+	tempDir := t.TempDir()
+	statePath := filepath.Join(tempDir, "state.json")
+	legacyPath := filepath.Join(tempDir, "net_static.json")
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(legacyPath, []byte(`{"interfaces":{}}`), 0o600); err != nil {
+		t.Fatalf("failed to write legacy counters: %v", err)
+	}
+
+	adjuster := &networkCounterAdjuster{statePath: statePath, legacyPath: legacyPath}
+	adjuster.apply(10_000, 20_000, "boot-a", "|", 1, now, nil, nil)
+	adjuster.apply(10_100, 20_200, "boot-a", "|", 1, now, nil, nil)
+
+	up, down := adjuster.apply(5_000, 3_000, "boot-a", "eth0|", 1, now, nil, nil)
+	if up != 100 || down != 200 {
+		t.Fatalf("expected filter change to preserve prior totals, got up=%d down=%d", up, down)
+	}
+
+	up, down = adjuster.apply(5_050, 3_060, "boot-a", "eth0|", 1, now, nil, nil)
+	if up != 150 || down != 260 {
+		t.Fatalf("expected post-filter deltas up=150 down=260, got up=%d down=%d", up, down)
+	}
+}
+
 func TestNetworkCounterAdjusterStartsAtZeroWithoutLegacyFile(t *testing.T) {
 	tempDir := t.TempDir()
 	adjuster := &networkCounterAdjuster{

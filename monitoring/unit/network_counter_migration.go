@@ -133,8 +133,7 @@ func (adjuster *networkCounterAdjuster) apply(
 	}
 
 	bootChanged := state.BootID != "" && bootID != "" && state.BootID != bootID
-	countersReset := rawUp < state.BaseRawUp && rawDown < state.BaseRawDown
-	if bootChanged || countersReset || state.FilterKey != filterKey {
+	if bootChanged {
 		state.RawMode = true
 		state.BootID = bootID
 		state.FilterKey = filterKey
@@ -144,8 +143,45 @@ func (adjuster *networkCounterAdjuster) apply(
 		return rawUp, rawDown
 	}
 
-	return state.BaseReportUp + safeCounterDelta(rawUp, state.BaseRawUp),
-		state.BaseReportDn + safeCounterDelta(rawDown, state.BaseRawDown)
+	filterChanged := state.FilterKey != filterKey
+	upReset := rawUp < state.BaseRawUp
+	downReset := rawDown < state.BaseRawDown
+	if filterChanged || upReset || downReset {
+		// Preserve the last reported total when the interface set changes. For a
+		// one-direction rollback, the unaffected direction may still book its
+		// normal delta. This mirrors the persistent per-direction baseline used
+		// by miaomiaowuX without exposing a raw-counter jump to the backend.
+		reportUp := state.BaseReportUp
+		reportDown := state.BaseReportDn
+		if !filterChanged && !upReset {
+			reportUp += safeCounterDelta(rawUp, state.BaseRawUp)
+		}
+		if !filterChanged && !downReset {
+			reportDown += safeCounterDelta(rawDown, state.BaseRawDown)
+		}
+
+		state.BootID = bootID
+		state.FilterKey = filterKey
+		state.BaseRawUp = rawUp
+		state.BaseRawDown = rawDown
+		state.BaseReportUp = reportUp
+		state.BaseReportDn = reportDown
+		if err := saveNetworkCounterState(adjuster.statePath, state); err != nil {
+			log.Printf("failed to rebase network counter compatibility state: %v", err)
+		}
+		return reportUp, reportDown
+	}
+
+	reportUp := state.BaseReportUp + safeCounterDelta(rawUp, state.BaseRawUp)
+	reportDown := state.BaseReportDn + safeCounterDelta(rawDown, state.BaseRawDown)
+	// Keep the in-memory baseline at the last emitted sample. The persisted
+	// baseline only needs updating when a reset/filter transition occurs; this
+	// avoids writing the state file on every report.
+	state.BaseRawUp = rawUp
+	state.BaseRawDown = rawDown
+	state.BaseReportUp = reportUp
+	state.BaseReportDn = reportDown
+	return reportUp, reportDown
 }
 
 func networkFilterKey(includeNics, excludeNics map[string]struct{}) string {
